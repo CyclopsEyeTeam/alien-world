@@ -20,11 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-26.04]
+        os: [ubuntu-24.04, ubuntu-latest]
     env:
       ELECTRIC_VISION_ROOT: ${{ github.workspace }}/electric-vision
       ALIEN_REQUIRE_LIVE_TEST: '1'
-      ALIEN_TEST_ARTIFACTS: ${{ runner.temp }}/alien-world-artifacts
     steps:
       - name: Checkout alien-world
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +59,8 @@ jobs:
           /usr/bin/python3 ./bin/check-setup
 
       - name: Run unit + live headless Xvfb Electric Eye & MCP observation suite
+        env:
+          ALIEN_TEST_ARTIFACTS: ${{ runner.temp }}/alien-world-artifacts
         run: make -C alien-world test PYTHON=/usr/bin/python3
 
       - name: Upload failed live-test diagnostics
@@ -67,6 +68,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: live-test-diagnostics-${{ matrix.os }}
-          path: ${{ env.ALIEN_TEST_ARTIFACTS }}
+          path: ${{ runner.temp }}/alien-world-artifacts
           if-no-files-found: ignore
           retention-days: 7

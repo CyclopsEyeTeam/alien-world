@@ -80,8 +80,10 @@ sudo apt-get update && sudo apt-get install -y \
 
 ### CI & Compatibility
 
-CI builds and tests on Ubuntu 24.04 (Python 3.12) and Ubuntu 26.04 (Python 3.14),
-using the distribution Python so GTK/Cairo packages match the interpreter.
+CI builds and tests on Ubuntu 24.04 (Python 3.12) and GitHub's latest Ubuntu image
+(currently Ubuntu 26.04 / Python 3.14), using the distribution Python so GTK/Cairo
+packages match the interpreter. The stable job stays reproducible while the
+latest-image job catches upcoming compatibility changes.
 The companion checkout is pinned to Electric Vision commit
 `5b11d4ce1a1aa0afdd1640bccc5bc4970e72d9e5`, which fixes multiprocessing
 startup on Python 3.14. Update that pin only after verifying both CI jobs.
