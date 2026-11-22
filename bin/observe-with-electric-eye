@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Observe a live Alien World window using Electric Vision + Active Signal Temp Buffer.
+
+Designed so an AI coding agent (or developer) can run one command right after
+cloning `alien-world` and `electric-vision` to:
+  1. Discover the running Alien World window and its exact native field crop
+     via Alien's local same-UID AF_UNIX observer endpoint,
+  2. Capture `N` live field frames into Electric Eye (`ElectricVisionAgentSession`
+     + `NativeSimdOperatorEngine` + `ElectricSignalTempBuffer`),
+  3. Output verified PNG snapshots, cyan connected-component shape overlays,
+     active-signal temp-buffer cache metrics, dominant chromatic swatches, and
+     frame-to-frame motion deltas,
+  4. Optionally send a named `unauthority` greeting (`--say "..." --as <name>`)
+     and observe the resulting electrical-rift ripple response!
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import time
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / 'observer_interface'))
+sys.path.insert(0, str(REPO_ROOT / 'app'))
+
+from _ev_bootstrap import DATA_ROOT, ensure_electric_vision, runtime_scratch_dir  # noqa: E402
+from alien_observation_session import LiveFieldSource  # noqa: E402
+from alien_observer import FieldObserver  # noqa: E402
+import observer_say  # noqa: E402
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--status', action='store_true', help='Check live Alien World observer endpoint status only')
+    parser.add_argument('--count', type=int, default=3, help='Number of field frames to observe (1..32, default: 3)')
+    parser.add_argument('--interval', type=float, default=1.2, help='Seconds between frames (0.2..60, default: 1.2)')
+    parser.add_argument('--keep', type=int, default=4, help='Retained frame artifacts on disk (1..8, default: 4)')
+    parser.add_argument('--output', type=Path, help='Dedicated empty directory for observation PNGs & JSON reports')
+    parser.add_argument('--say', type=str, help='Optional short unauthority message to send to Alien during observation')
+    parser.add_argument('--as', dest='participant', default='electric-eye',
+                        help='Lowercase observer name for --say (default: electric-eye)')
+    parser.add_argument('--window-id', type=lambda s: int(s, 0), help='Optional explicit X11 window ID')
+    args = parser.parse_args(argv)
+
+    runtime_dir = os.environ.get('XDG_RUNTIME_DIR')
+    if not runtime_dir or not (Path(runtime_dir) / 'alienworld-observer').is_dir():
+        fallback = DATA_ROOT / 'runtime'
+        if (fallback / 'alienworld-observer').is_dir():
+            os.environ['XDG_RUNTIME_DIR'] = str(fallback)
+
+    source = LiveFieldSource()
+    try:
+        binding = source.status(window_id=args.window_id)
+    except Exception as exc:
+        print(json.dumps({
+            'status': 'unavailable',
+            'reason': str(exc),
+            'hint': 'Start Alien World first with: ./bin/alien-world --background',
+        }, indent=2))
+        return 2
+
+    if args.status:
+        public_binding = {k: v for k, v in binding.items() if not k.startswith('_')}
+        print(json.dumps({'status': 'ready', 'alien_window': public_binding}, indent=2))
+        return 0
+
+    if not 1 <= args.count <= 32:
+        parser.error('--count must be between 1 and 32')
+    if not 0.2 <= args.interval <= 60.0:
+        parser.error('--interval must be between 0.2 and 60.0 seconds')
+
+    ev_root = ensure_electric_vision()
+    from electric_vision_agent_bridge import ElectricVisionAgentSession
+
+    obs_base = DATA_ROOT / 'observations' / 'electric-eye-runs'
+    obs_base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    out_dir = args.output.resolve() if args.output else Path(
+        tempfile.mkdtemp(prefix=time.strftime('visit-%Y%m%d-%H%M%S-'), dir=obs_base)
+    )
+
+    scratch = runtime_scratch_dir()
+    frames_out = []
+    say_receipt = None
+
+    try:
+        with tempfile.TemporaryDirectory(prefix='ee-', dir=scratch) as sock_dir:
+            with ElectricVisionAgentSession(run_dir=sock_dir, allow_alien_field=True) as eye:
+                observer = FieldObserver(eye, out_dir, keep=max(args.keep, min(8, args.count)))
+                for idx in range(args.count):
+                    if idx > 0:
+                        time.sleep(args.interval)
+                    # Refresh binding in case drawn_sequence advanced (geometry stays verified)
+                    current_binding = source.status(window_id=binding['window_id'])
+                    picture, meta = source.capture(current_binding)
+                    try:
+                        report = observer.observe(picture, meta)
+                    finally:
+                        picture.close()
+                    report['alien_drawn_sequence'] = current_binding.get('drawn_sequence')
+                    frames_out.append(report)
+
+                    # Send optional greeting right after the first observed frame so subsequent frames see the ripple!
+                    if idx == 0 and args.say:
+                        _code, say_receipt = observer_say.send(
+                            args.participant,
+                            text=args.say,
+                            directory=source.directory,
+                        )
+    except Exception as exc:
+        print(json.dumps({
+            'status': 'error',
+            'reason': str(exc),
+            'electric_vision_root': str(ev_root) if ev_root else None,
+        }, indent=2))
+        return 1
+
+    latest = frames_out[-1]
+    summary = {
+        'status': 'ok',
+        'electric_vision_root': str(ev_root) if ev_root else None,
+        'output_dir': str(out_dir),
+        'alien_world': {
+            'pid': binding['pid'],
+            'window_id': binding['window_id'],
+            'world_id': binding['world_id'],
+            'segment_id': binding['segment_id'],
+            'window_size': binding['size'],
+            'field_crop': binding['crop'],
+            'drawn_sequence_start': frames_out[0].get('alien_drawn_sequence'),
+            'drawn_sequence_end': latest.get('alien_drawn_sequence'),
+        },
+        'frames_observed': len(frames_out),
+        'latest_image': latest['image'],
+        'latest_shapes_overlay': latest['shapes_image'],
+        'latest_component_boxes': len(latest.get('shapes', [])),
+        'latest_colours': latest.get('trace', {}).get('colours'),
+        'latest_pixel_change': latest.get('pixel_change'),
+        'latest_trace_change': latest.get('trace_change'),
+        'signal_temp_buffer': latest.get('signal_buffer'),
+        'say_receipt': say_receipt,
+        'frames': [
+            {
+                'sequence': f['sequence'],
+                'alien_drawn_sequence': f.get('alien_drawn_sequence'),
+                'image': f['image'],
+                'shapes_image': f['shapes_image'],
+                'source_png_sha256': f['source_png_sha256'],
+                'component_count': len(f.get('shapes', [])),
+                'colours': f.get('trace', {}).get('colours'),
+                'pixel_change': f.get('pixel_change'),
+                'signal_buffer': f.get('signal_buffer'),
+            }
+            for f in frames_out
+        ],
+    }
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

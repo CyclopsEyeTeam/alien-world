@@ -1,0 +1,39 @@
+#!/bin/sh
+# Portable Alien Observer MCP stdio server launcher.
+set -eu
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+runtime_dir=${XDG_RUNTIME_DIR:-"$repo/data/runtime"}
+mkdir -p "$runtime_dir" "$repo/data/observations"
+chmod 700 "$runtime_dir" "$repo/data/observations" 2>/dev/null || true
+
+set -- /usr/bin/python3 -B "$repo/observer_interface/alien_mcp.py" "$@"
+
+if [ -n "${ELECTRIC_VISION_ROOT:-}" ]; then
+    set -- ELECTRIC_VISION_ROOT="$ELECTRIC_VISION_ROOT" "$@"
+fi
+if [ -n "${ALIEN_OBSERVATIONS_DIR:-}" ]; then
+    set -- ALIEN_OBSERVATIONS_DIR="$ALIEN_OBSERVATIONS_DIR" "$@"
+else
+    set -- ALIEN_OBSERVATIONS_DIR="$repo/data/observations" "$@"
+fi
+if [ -n "${XAUTHORITY:-}" ]; then
+    set -- XAUTHORITY="$XAUTHORITY" "$@"
+elif [ -f "${HOME:-}/.Xauthority" ]; then
+    set -- XAUTHORITY="$HOME/.Xauthority" "$@"
+fi
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    set -- WAYLAND_DISPLAY="$WAYLAND_DISPLAY" "$@"
+fi
+if [ -n "${DISPLAY:-}" ]; then
+    set -- DISPLAY="$DISPLAY" "$@"
+fi
+
+exec /usr/bin/env -i \
+    HOME="${HOME:-/tmp}" \
+    PATH="${PATH:-/usr/bin:/bin}" \
+    LANG="${LANG:-C.UTF-8}" \
+    XDG_RUNTIME_DIR="$runtime_dir" \
+    ALIEN_WORLD_ROOT="$repo" \
+    ALIEN_WORLD_DATA_DIR="${ALIEN_WORLD_DATA_DIR:-$repo/data}" \
+    "$@"

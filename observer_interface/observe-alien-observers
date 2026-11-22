@@ -1,0 +1,5 @@
+#!/bin/sh
+# Separate owner history window; does not capture or send anything.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec /usr/bin/python3 -B "$here/alien_observers.py" "$@"

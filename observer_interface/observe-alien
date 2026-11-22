@@ -1,0 +1,5 @@
+#!/bin/sh
+# Agent observation entrance. Capture requires an explicit field rectangle.
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec /usr/bin/python3 -B "$here/alien_observer.py" "$@"

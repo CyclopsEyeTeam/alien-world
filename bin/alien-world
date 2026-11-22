@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Launch Alien World (foreground desktop window or --background agent-ready daemon)."""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _ensure_runtime_dirs(data_dir: Path) -> Path:
+    data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for sub in ('world', 'sessions', 'api-feed', 'observations', 'reports'):
+        (data_dir / sub).mkdir(parents=True, exist_ok=True, mode=0o700)
+    runtime = os.environ.get('XDG_RUNTIME_DIR')
+    if not runtime or not Path(runtime).is_dir():
+        fallback = data_dir / 'runtime'
+        fallback.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(fallback, 0o700)
+        os.environ['XDG_RUNTIME_DIR'] = str(fallback)
+        return fallback
+    return Path(runtime)
+
+
+def _probe_ready_endpoint(runtime_dir: Path, target_pid: int | None = None) -> dict | None:
+    obs_dir = runtime_dir / 'alienworld-observer'
+    if not obs_dir.is_dir():
+        return None
+    for sock_path in sorted(obs_dir.glob('*.sock')):
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as peer:
+                peer.settimeout(1.0)
+                peer.connect(str(sock_path))
+                peer.sendall(b'{"op":"status"}')
+                raw = peer.recv(32768)
+            reply = json.loads(raw)
+            if not reply.get('ok'):
+                continue
+            res = reply['result']
+            if target_pid is not None and res.get('pid') != target_pid:
+                continue
+            if res.get('ready'):
+                res['endpoint'] = str(sock_path)
+                return res
+        except Exception:
+            continue
+    return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--data-dir', type=Path, default=Path(os.environ.get('ALIEN_WORLD_DATA_DIR') or (REPO_ROOT / 'data')))
+    parser.add_argument('--background', action='store_true', help='Launch detached and wait until the OpenGL field & observer endpoint are ready')
+    parser.add_argument('--wait-timeout', type=float, default=15.0, help='Seconds to wait for readiness with --background')
+    parser.add_argument('--fresh-session', action='store_true', help='Start an isolated session instead of continuing data/world')
+    parser.add_argument('--cols', type=int)
+    parser.add_argument('--rows', type=int)
+    parser.add_argument('--fps', type=float, default=0.0)
+    args, extra = parser.parse_known_args()
+
+    data_dir = args.data_dir.resolve()
+    runtime_dir = _ensure_runtime_dirs(data_dir)
+
+    # Check if already running and ready
+    existing = _probe_ready_endpoint(runtime_dir)
+    if existing is not None:
+        if args.background:
+            print(json.dumps({'status': 'already_running', **existing}))
+            return 0
+        try:
+            subprocess.run(
+                ['python3', '-c',
+                 'import sys, Xlib.display, Xlib.X, Xlib.protocol.event as e; '
+                 'd=Xlib.display.Display(); r=d.screen().root; w=d.create_resource_object("window", int(sys.argv[1])); '
+                 'a=d.intern_atom("_NET_ACTIVE_WINDOW"); '
+                 'r.send_event(e.ClientMessage(window=w, client_type=a, data=(32,[1,Xlib.X.CurrentTime,0,0,0])), '
+                 'event_mask=Xlib.X.SubstructureRedirectMask|Xlib.X.SubstructureNotifyMask); d.sync()',
+                 str(existing['window_id'])],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+        print(json.dumps({'status': 'already_running', **existing}))
+        return 0
+
+    cmd = [
+        sys.executable or '/usr/bin/python3', '-B',
+        str(REPO_ROOT / 'app' / 'live.py'),
+        '--sessions', str(data_dir / 'sessions'),
+        '--content-cache', str(data_dir / 'alien.cache'),
+        '--api-data', str(data_dir / 'api-feed'),
+    ]
+    if not args.fresh_session:
+        cmd.extend(['--world-data', str(data_dir / 'world')])
+    keys_file = REPO_ROOT / '.env'
+    if keys_file.is_file():
+        cmd.extend(['--keys-file', str(keys_file)])
+    if args.cols is not None and args.rows is not None:
+        cmd.extend(['--cols', str(args.cols), '--rows', str(args.rows)])
+    if args.fps:
+        cmd.extend(['--fps', str(args.fps)])
+    cmd.extend(extra)
+
+    env = dict(os.environ)
+    env.setdefault('GDK_BACKEND', 'x11')
+    env.setdefault('ALIEN_WORLD_ROOT', str(REPO_ROOT))
+    env.setdefault('ALIEN_WORLD_DATA_DIR', str(data_dir))
+    env.setdefault('ALIEN_OBSERVATIONS_DIR', str(data_dir / 'observations'))
+
+    if not args.background:
+        lock_file = (data_dir / 'alien-world.lock').open('w')
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Alien World is already starting or open.', file=sys.stderr)
+            return 0
+        os.execve(cmd[0], cmd, env)
+
+    log_path = data_dir / 'alien-world.log'
+    with log_path.open('ab') as log_stream:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log_stream,
+            stderr=log_stream,
+            env=env,
+            start_new_session=True,
+        )
+
+    deadline = time.monotonic() + max(1.0, args.wait_timeout)
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            tail = log_path.read_text(errors='replace')[-1200:] if log_path.is_file() else ''
+            print(json.dumps({
+                'status': 'exited',
+                'returncode': proc.returncode,
+                'log_path': str(log_path),
+                'log_tail': tail,
+            }))
+            return 1
+        ready = _probe_ready_endpoint(runtime_dir, target_pid=proc.pid)
+        if ready is not None:
+            print(json.dumps({'status': 'ready', 'log_path': str(log_path), **ready}))
+            return 0
+        time.sleep(0.25)
+
+    print(json.dumps({
+        'status': 'starting_timeout',
+        'pid': proc.pid,
+        'log_path': str(log_path),
+        'note': 'Process is running; observer endpoint not yet ready (check DISPLAY / OpenGL).',
+    }))
+    return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

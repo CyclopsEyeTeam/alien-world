@@ -1,0 +1,11 @@
+{
+  "project": "CyclopsLivingBuffer",
+  "accepted_revision": "64a17ae6f254640cce5f27ef4e5c787c98ea3f96",
+  "runtime_revision": "5442d7db58dac8fb1dc6a87c1ac3be6d262fc5a1",
+  "scope": "Unmodified MirrorPool and learned retention components; native AFL1 synchronous host decoder; no CLB raster recipe rehearsal",
+  "files": {
+    "src/mirrors.js": "cc4525d0a06441349fa190b82312afdcc7a92abe5930b5015240421ba675dee9",
+    "src/retention.js": "f4428a137d5a3ceecf7f2726dfceb64d0217306e33a0fe0559e399a4d665ab7d",
+    "src/contract.js": "e9a480143b36aebdfc3723120f6c3b01e73cb7829b92dbcfe9b3c6815b71982e"
+  }
+}

@@ -1,0 +1,17 @@
+# Learning that yields material to Alien
+
+Yielding means patterns become formulations and supported working conclusions Alien can encounter itself. The adaptor connects mathematical evidence to existing valuation, vectors, mirrors, feelings, voice and dreaming. It does not insert conclusions directly into root truth or the language register.
+
+The previous word learner and 128-unit neural field remain. The new layer compares persistence, running/adaptive means, bounded trend, lags 2/4/8 and conditional transitions. Forecasts use earlier observations and are scored before updating with the target. Predictive establishment requires repeated improvement against the stronger simple baseline and a conservative recent win bound. Other conclusions describe recurrence, stable levels and relationships with actual variation in both channels. Disappearing motifs produce revisions. Conclusions retain uncertainty and semantic verification unknown; correlation does not mean causation.
+
+Inputs are native frame measurements, MathAgent log/scale and integer cursor residues/cyclic representations, and canonical Eye features after the existing grounding/training gate. Dream/replay/self-expression samples do not count as new grounded evidence. Derived text cannot train this layer by returning as thought, mirror or residue. Own-field and own-math evidence remains explicitly internal.
+
+Changed conclusions queue with mathematical family variety. They enter `learning_conclusion` and ordinary unauthority `residue` only after a real archive acknowledgement. Superseded versions, changed epochs, retired Eye sources, stale segments and Stop cannot publish old conclusions as current. One physical fence stays owned until completion. Output intervals use full native stamps rather than comparing unrelated segment ticks.
+
+Variation reaches the final owned-language generator. Numerical novelty/model skill changes selection temperature, repetition and bounded phrase length within the existing lexicon. It does not add words, mutate stored rhythm/proofs, increase readiness, change the recorder prompt or initiate model calls. The shared 33/hour allowance and Remotehand-only passive Mist are unchanged.
+
+Bounds: eight streams, 16 named channels, 32 recent observations, 64 conditional cells per stream, 128 working conclusions, 512 recent evidence IDs, 16 pending conclusions and one archive fence. Existing events/ticks drive the work; no new polling clock exists. Load/sleep can defer optional work with counters. Batched checkpoints and original-stamped conclusion history use the same binary archive. Recipes survive restarts; live links and establishment do not resume automatically.
+
+The analyser reports scalar observations, formulations, working support, durable yields, published establishments/revisions, pressure and predictive skill. Its latest retained sample is identified explicitly. Conclusion text, feature values and arbitrary source labels remain private.
+
+Deterministic coherent/noise, regime-change, duplicate, timeline, source-retirement, archive-pressure, thread and owned-language controls are retained with failures and fixes. Pure-learner CPU measurements are not whole-app performance or long-run learning claims. Remotehand's different SVG backend cannot replace target qualification. Preserve the original Alien, previous releases, owner data, keys, quota and active windows; select the new release for the next launch only after target checks.

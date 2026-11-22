@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Verify Alien World + Electric Vision environment, build native C fast-path if needed, and report readiness."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / 'observer_interface'))
+
+from _ev_bootstrap import find_electric_vision_root, ensure_electric_vision  # noqa: E402
+
+
+def try_build_fast_cells() -> dict:
+    so_path = REPO_ROOT / 'app' / '_fast_cells.abi3.so'
+    c_path = REPO_ROOT / 'app' / '_fast_cells.c'
+    sys.path.insert(0, str(REPO_ROOT / 'app'))
+    try:
+        import _fast_cells  # noqa: F401
+        return {'ready': True, 'mode': 'native_c_abi3', 'artifact': str(so_path), 'built_now': False}
+    except Exception:
+        pass
+
+    cc = shutil.which(os.environ.get('CC') or 'cc') or shutil.which('gcc') or shutil.which('clang')
+    py_cfg = shutil.which('python3-config')
+    if cc and py_cfg and c_path.is_file():
+        try:
+            inc = subprocess.check_output([py_cfg, '--includes'], text=True).split()
+            cmd = [
+                cc, '-O3', '-ffp-contract=off', '-fPIC', '-shared',
+                '-DPy_LIMITED_API=0x030a0000', *inc,
+                str(c_path), '-lm', '-o', str(so_path),
+            ]
+            subprocess.check_call(cmd)
+            import importlib
+            importlib.invalidate_caches()
+            import _fast_cells  # noqa: F401
+            return {'ready': True, 'mode': 'native_c_abi3', 'artifact': str(so_path), 'built_now': True}
+        except Exception as exc:
+            return {'ready': True, 'mode': 'python_exact_fallback', 'build_note': str(exc)}
+    return {'ready': True, 'mode': 'python_exact_fallback', 'build_note': 'cc or python3-config not installed; bit-exact Python renderer active'}
+
+
+def check_all() -> dict:
+    checks: dict = {'repo_root': str(REPO_ROOT), 'python': sys.version.split()[0], 'ok': True, 'missing': []}
+
+    # 1. GTK3 / GObject / Cairo / Pillow / Xlib
+    py_deps = {}
+    for label, stmt in [
+        ('gtk3', "import gi; gi.require_version('Gtk', '3.0'); from gi.repository import Gtk"),
+        ('gdk_x11', "import gi; gi.require_version('GdkX11', '3.0'); from gi.repository import GdkX11"),
+        ('pycairo', 'import cairo'),
+        ('pillow', 'from PIL import Image'),
+        ('python_xlib', 'import Xlib'),
+    ]:
+        try:
+            exec(stmt, {})
+            py_deps[label] = True
+        except Exception as exc:
+            py_deps[label] = f'missing ({exc})'
+            checks['missing'].append(label)
+            checks['ok'] = False
+    checks['python_packages'] = py_deps
+
+    # 2. Optional Node.js for Living Buffer MirrorPool
+    node = shutil.which(os.environ.get('CYCLOPS_NODE') or 'node') or shutil.which('node', path=str(Path.home() / '.local/bin'))
+    checks['node_living_buffer'] = {'available': bool(node), 'path': node}
+
+    # 3. Native _fast_cells extension
+    checks['fast_cells'] = try_build_fast_cells()
+
+    # 4. Companion Electric Vision repository
+    ev_root = find_electric_vision_root()
+    if ev_root is None:
+        checks['electric_vision'] = {
+            'found': False,
+            'hint': 'Clone https://github.com/CyclopsEyeTeam/electric-vision next to alien-world (../electric-vision) or set ELECTRIC_VISION_ROOT.',
+        }
+        checks['missing'].append('electric-vision')
+        checks['ok'] = False
+    else:
+        try:
+            ensure_electric_vision()
+            from prod_gate_enclave import NativeSimdOperatorEngine
+            from signal_buffer import ElectricSignalTempBuffer
+            simd = NativeSimdOperatorEngine().verify_self_test_or_rollback(inject_perturbation=False)
+            buf = ElectricSignalTempBuffer(max_entries=4)
+            checks['electric_vision'] = {
+                'found': True,
+                'root': str(ev_root),
+                'simd_self_test_passed': bool(simd.get('self_test_passed')),
+                'simd_backend': simd.get('backend', 'native'),
+                'signal_temp_buffer_ready': buf.max_entries == 4,
+            }
+            if not simd.get('self_test_passed'):
+                checks['ok'] = False
+                checks['missing'].append('electric-vision-simd')
+        except Exception as exc:
+            checks['electric_vision'] = {'found': True, 'root': str(ev_root), 'error': str(exc)}
+            checks['ok'] = False
+            checks['missing'].append('electric-vision-runtime')
+
+    # 5. X11 Display check
+    checks['display'] = {
+        'DISPLAY': os.environ.get('DISPLAY'),
+        'XDG_RUNTIME_DIR': os.environ.get('XDG_RUNTIME_DIR'),
+        'xvfb_run_available': bool(shutil.which('xvfb-run')),
+    }
+    return checks
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--json', action='store_true', help='Print machine-readable JSON only')
+    args = parser.parse_args()
+    report = check_all()
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print('=== Alien World + Electric Vision Setup Check ===')
+        print(f"Repo root        : {report['repo_root']}")
+        print(f"Python           : {report['python']}")
+        print(f"Renderer         : {report['fast_cells']['mode']}")
+        print(f"Living Buffer JS : {'ready (' + report['node_living_buffer']['path'] + ')' if report['node_living_buffer']['available'] else 'optional (native Python fallback active)'}")
+        ev = report['electric_vision']
+        if ev.get('found') and ev.get('simd_self_test_passed'):
+            print(f"Electric Vision  : ready ({ev['root']}) [SIMD + Active Signal Temp Buffer OK]")
+        else:
+            print(f"Electric Vision  : NOT READY — {ev.get('error') or ev.get('hint')}")
+        print(f"X11 Display      : DISPLAY={report['display']['DISPLAY']!r} (xvfb-run={'yes' if report['display']['xvfb_run_available'] else 'no'})")
+        if report['ok']:
+            print('Status           : ALL READY')
+        else:
+            print(f"Status           : MISSING {', '.join(report['missing'])}")
+    return 0 if report['ok'] else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

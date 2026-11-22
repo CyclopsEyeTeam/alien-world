@@ -1,0 +1,23 @@
+# Runtime world state, binary content archive, logs, and observations
+/data/
+/sessions/
+/world/
+/work/
+*.cache
+*.cache-wal
+*.cache-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.lock
+
+# Local provider secrets (never commit!)
+.env
+.env.*
+!.env.example
+
+# Python bytecode & build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
