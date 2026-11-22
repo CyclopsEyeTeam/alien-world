@@ -39,7 +39,7 @@ If `./bin/check-setup` reports missing system packages on Debian/Ubuntu/Mint:
 ```bash
 sudo apt-get update && sudo apt-get install -y \
   python3 python3-dev python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-  python3-cairo python3-pil python3-xlib build-essential libgl1 libepoxy0 xvfb
+  python3-cairo python3-pil python3-xlib build-essential libgl1 libepoxy0 xvfb xauth
 ```
 
 *(Node.js `nodejs` >= 20 is optional and enables the Living Buffer MirrorPool frame receiver; Alien World automatically falls back to direct native display if Node is absent.)*
@@ -70,12 +70,16 @@ It prints JSON once ready:
 
 ### On a Headless Server / Container / VM (No Physical Monitor)
 
-Wrap with `xvfb-run` using a 24-bit GLX virtual screen:
+For a self-contained headless check, `make demo` starts a 24-bit GLX Xvfb
+screen, tests an isolated world, and shuts it down afterwards:
 
 ```bash
-xvfb-run -a -s "-screen 0 1280x800x24 +extension GLX +extension Composite" ./bin/check-and-demo
+make demo
 ```
-*(Or keep a persistent `Xvfb :99 -screen 0 1280x800x24 +extension GLX +extension Composite &` and `export DISPLAY=:99`.)*
+
+To keep a world running for the observation steps below, start an Xvfb server
+on an unused display number, export that `DISPLAY`, and then run
+`./bin/alien-world --background` as on a desktop session.
 
 ---
 

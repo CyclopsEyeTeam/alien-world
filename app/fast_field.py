@@ -204,12 +204,17 @@ def renderer_class(ns):
     class PreparedRenderer(ns['RenderAgent']):
         def _prepare_field(self,cols,rows,t):
             self.prepared_cell=prepare_cell(ns,self.genome,t,cols,rows,getattr(self,'_chroma_hue',0.0),getattr(self,'_chroma_pulse',0.0))
+            self._prepare_axes(cols,rows)
+        def _prepare_axes(self,cols,rows):
+            geometry=(cols,rows,self.scale)
+            if getattr(self,'_prepared_geometry',None)==geometry:return
             # sample_xy's axes are independent. A one-cell companion axis
             # keeps it in bounds even when a zoom-out clips the real edge.
             xs=[sample(x,0,self.scale,cols,1) for x in range(cols)]
             ys=[sample(0,y,self.scale,1,rows) for y in range(rows)]
             self.prepared_x=[None if p is None else p[0] for p in xs]
             self.prepared_y=[None if p is None else p[1] for y,p in enumerate(ys)]
+            self._prepared_geometry=geometry
         def _frame(self,cols,rows,t):
             if profile is None:self._prepare_field(cols,rows,t)
             else:profile.call('field_prepare',self._prepare_field,cols,rows,t)

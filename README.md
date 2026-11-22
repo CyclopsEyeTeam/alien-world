@@ -60,7 +60,7 @@ Ubuntu / Debian / Linux Mint one-liner:
 ```bash
 sudo apt-get update && sudo apt-get install -y \
   python3 python3-dev python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
-  python3-cairo python3-pil python3-xlib build-essential libgl1 libepoxy0 xvfb
+  python3-cairo python3-pil python3-xlib build-essential libgl1 libepoxy0 xvfb xauth
 ```
 
 ---
@@ -76,6 +76,21 @@ sudo apt-get update && sudo apt-get install -y \
 | `./bin/alien-say --as <name> "..."` | Send rate-limited `unauthority` words (or `--drawing file.png --title "..."`) to the running Alien World |
 | `./bin/alien-observer-mcp` | Run the stdio MCP server (`alien_observer_*` / `alien_observe_*` / `alien_say` tools) for 93-second continuous 5 FPS visits |
 | `make test` | Run automated unit & headless `xvfb-run` integration tests |
+| `make demo` | Run only the live headless Electric Eye & MCP integration test |
+
+### CI & Compatibility
+
+CI builds and tests on Ubuntu 24.04 (Python 3.12) and Ubuntu 26.04 (Python 3.14),
+using the distribution Python so GTK/Cairo packages match the interpreter.
+The companion checkout is pinned to Electric Vision commit
+`5b11d4ce1a1aa0afdd1640bccc5bc4970e72d9e5`, which fixes multiprocessing
+startup on Python 3.14. Update that pin only after verifying both CI jobs.
+For an older local companion checkout, run `git -C ../electric-vision pull --ff-only`.
+
+`make test` includes the live software-OpenGL demo even without a physical monitor;
+`make demo` runs only that end-to-end test. CI fails rather than silently skipping
+the live test when its prerequisites are missing, and uploads failure logs as
+short-lived workflow artifacts.
 
 ---
 
