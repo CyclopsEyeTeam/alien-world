@@ -1,17 +1,20 @@
 """Automated unit and headless Electric Vision integration tests for Alien World."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import unittest
 
 from PIL import Image, ImageDraw
@@ -19,6 +22,42 @@ from PIL import Image, ImageDraw
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / 'app'))
 sys.path.insert(0, str(REPO_ROOT / 'observer_interface'))
+
+
+def read_mcp_response(stream, timeout=20):
+    """Bound the whole JSON line, including a server stalled mid-response."""
+    deadline = time.monotonic() + timeout
+    payload = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([stream], [], [], remaining)[0]:
+            raise TimeoutError(f'MCP response timed out after {timeout}s ({len(payload)} bytes received)')
+        chunk = os.read(stream.fileno(), 65536)
+        if not chunk:
+            raise EOFError('MCP closed stdout before completing its response')
+        payload.extend(chunk)
+        if len(payload) > 8 * 1024 * 1024:
+            raise ValueError('MCP response exceeds 8 MiB')
+        if b'\n' in chunk:
+            return json.loads(payload)
+
+
+class McpResponseTests(unittest.TestCase):
+    def test_partial_response_cannot_block_forever(self):
+        reader, writer = os.pipe()
+        with os.fdopen(reader, 'rb') as stream, os.fdopen(writer, 'wb', buffering=0) as peer:
+            peer.write(b'{"jsonrpc":')
+            with self.assertRaises(TimeoutError):
+                read_mcp_response(stream, timeout=0.05)
+
+    def test_complete_response_and_eof(self):
+        reader, writer = os.pipe()
+        with os.fdopen(reader, 'rb') as stream, os.fdopen(writer, 'wb', buffering=0) as peer:
+            peer.write(b'{"jsonrpc":"2.0","id":1,"result":{}}\n')
+            self.assertEqual(read_mcp_response(stream)['id'], 1)
+            peer.close()
+            with self.assertRaises(EOFError):
+                read_mcp_response(stream)
 
 
 class CoreAlienWorldUnitTests(unittest.TestCase):
@@ -125,9 +164,14 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
 
     def test_launch_alien_world_and_observe_with_electric_eye_and_mcp(self):
         if not os.environ.get('DISPLAY'):
+            if os.environ.get('ALIEN_REQUIRE_LIVE_TEST') == '1':
+                self.fail('Live CI test requires DISPLAY (run make test)')
             self.skipTest('DISPLAY not set (run under xvfb-run or a desktop X11 session)')
         from _ev_bootstrap import find_electric_vision_root
-        if find_electric_vision_root() is None:
+        ev_root = find_electric_vision_root()
+        if ev_root is None:
+            if os.environ.get('ALIEN_REQUIRE_LIVE_TEST') == '1':
+                self.fail('Live CI test requires the companion electric-vision checkout')
             self.skipTest('Companion electric-vision repo not present')
 
         tmp = Path(tempfile.mkdtemp(prefix='aw-live-e2e-'))
@@ -138,11 +182,20 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
         rt_dir.mkdir(mode=0o700)
 
         env = dict(os.environ)
+        env['ALIEN_WORLD_ROOT'] = str(REPO_ROOT)
         env['ALIEN_WORLD_DATA_DIR'] = str(data_dir)
         env['ALIEN_OBSERVATIONS_DIR'] = str(data_dir / 'observations')
+        env['ELECTRIC_VISION_ROOT'] = str(ev_root)
         env['XDG_RUNTIME_DIR'] = str(rt_dir)
         env['GDK_BACKEND'] = 'x11'
         env.setdefault('LIBGL_ALWAYS_SOFTWARE', '1')
+        for key, name in (
+            ('HOME', 'home'), ('XDG_CONFIG_HOME', 'config'),
+            ('XDG_STATE_HOME', 'state'), ('XDG_CACHE_HOME', 'cache'),
+        ):
+            folder = tmp / name
+            folder.mkdir(mode=0o700)
+            env[key] = str(folder)
 
         alien_pid = None
         try:
@@ -151,10 +204,11 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
                 [sys.executable, str(REPO_ROOT / 'bin' / 'alien-world'), '--background', '--wait-timeout', '20'],
                 env=env, capture_output=True, text=True, timeout=25,
             )
+            ready_info = json.loads(launch.stdout.strip().splitlines()[-1]) if launch.stdout.strip() else {}
+            if ready_info.get('pid'):
+                alien_pid = int(ready_info['pid'])
             self.assertEqual(launch.returncode, 0, f'Launch failed: {launch.stdout}\n{launch.stderr}')
-            ready_info = json.loads(launch.stdout.strip().splitlines()[-1])
             self.assertEqual(ready_info['status'], 'ready')
-            alien_pid = int(ready_info['pid'])
 
             # 2. Observe live window via `./bin/observe-with-electric-eye` + send named unauthority greeting
             obs = subprocess.run(
@@ -189,11 +243,11 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
                             'jsonrpc': '2.0', 'id': req_id, 'method': method, 'params': params or {},
                         }) + '\n')
                         mcp_proc.stdin.flush()
-                        line = mcp_proc.stdout.readline()
-                        if not line:
+                        try:
+                            return read_mcp_response(mcp_proc.stdout)
+                        except (EOFError, TimeoutError, ValueError) as error:
                             mcp_err.seek(0)
-                            self.fail(f'MCP EOF on req {req_id}; rc={mcp_proc.poll()}; stderr={mcp_err.read()}')
-                        return json.loads(line)
+                            self.fail(f'MCP req {req_id}: {error}; rc={mcp_proc.poll()}; stderr={mcp_err.read()}')
 
                     r_init = rpc(1, 'initialize', {'protocolVersion': '2025-03-26'})
                     self.assertEqual(r_init['result']['serverInfo']['name'], 'alien-observer')
@@ -209,7 +263,6 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
                     open_meta = json.loads(r_open['result']['content'][0]['text'])
                     img_block = r_open['result']['content'][1]
                     self.assertEqual(img_block['type'], 'image')
-                    import base64
                     actual_sha = hashlib.sha256(base64.b64decode(img_block['data'])).hexdigest()
                     self.assertEqual(actual_sha, open_meta['sha256'])
 
@@ -268,7 +321,24 @@ class LiveHeadlessElectricEyeDemoTest(unittest.TestCase):
                         mcp_proc.wait(timeout=8)
                     except subprocess.TimeoutExpired:
                         mcp_proc.terminate()
-                        mcp_proc.wait(timeout=5)
+                        try:
+                            mcp_proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            mcp_proc.kill()
+                            mcp_proc.wait(timeout=5)
+        except Exception:
+            diagnostics = traceback.format_exc()
+            for log in (data_dir / 'alien-world.log', tmp / 'mcp-stderr.log'):
+                if log.is_file():
+                    tail = log.read_text(errors='replace')[-16000:]
+                    diagnostics += f'\n--- {log.name} ---\n{tail}\n'
+            print(diagnostics, file=sys.stderr)
+            artifacts = os.environ.get('ALIEN_TEST_ARTIFACTS')
+            if artifacts:
+                destination = Path(artifacts)
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / 'live-test-failure.log').write_text(diagnostics)
+            raise
         finally:
             if alien_pid is not None:
                 try:

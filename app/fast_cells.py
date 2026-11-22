@@ -2,10 +2,8 @@
 
 The extension replicates fast_field.prepare_cell and the native
 _build_cells grid loop with the same libm sin, the same expression order
-and no FP contraction; benchmark_frame.py asserts exact cells/RGB
-equality against the prior release source before any release selection.
-There is no silent Python fallback here: a missing or mismatched
-extension is a packaging error and fails loudly.
+and no FP contraction. Tests assert exact frame/metric equality against
+the Python path, which remains available when the extension is absent.
 """
 from fast_field import prepare_state
 from fast_ripples import renderer_class as ripple_renderer
@@ -19,6 +17,10 @@ def renderer_class(ns):
     if _fast_cells is None:
         return Base
     class FastCells(Base):
+        def _prepare_field(self, cols, rows, t):
+            # C prepares its own field scalars; only the zoom mapping is shared.
+            self._prepare_axes(cols, rows)
+
         def _build_cells(self, cols, rows, t, void):
             s = prepare_state(ns, self.genome, t, cols, rows, getattr(self, '_chroma_hue', 0.0), getattr(self, '_chroma_pulse', 0.0))
             spark_left = -1
